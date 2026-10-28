@@ -13,7 +13,8 @@
     var game = Object.assign({}, a.red, {
       story: Object.assign({}, a.red.story, { pending: q }),
       decision: a.pending ? { id: a.pending.id, region: a.pending.region } : null,
-      site: a.site
+      site: a.site,
+      detect: KB.redDetectView(a) // Erkennungsrate je Land und Entdeckung je Basis (Rot sieht, wie gut Blau beobachtet)
     });
     return {
       role: "red",
@@ -57,11 +58,11 @@
     if (war) { var rx = SG.X(red); wv = rx.war ? { humanity: rx.war.humanity, damage: rx.war.damage, regroup: rx.war.regroup } : null; }
 
     var g = Object.assign({}, a);
-    delete g.ai; delete g.rng; delete g.mpq; delete g.site;
+    delete g.ai; delete g.rng; delete g.mpq; delete g.site; delete g.det; // die Entdeckung je Basis bleibt geheim, bis sie 100 % erreicht
     g.meta = meta;
     g.red = {
       sh: true, sig: sig, world: world, bases: bases, warView: wv, war: war,
-      suspicion: red.suspicion,
+      suspicion: a.threat || 0, // Blau-Oberfläche: Bedrohung = Vorteil der KI
       robots: war ? red.robots : 0,
       // Kasse nur grob (Schwellen 1000/1500/2000 der Entscheidungen bleiben genau, mehr erfährt Blau nicht)
       cash: Math.min(2000, Math.floor(red.cash / 500) * 500),

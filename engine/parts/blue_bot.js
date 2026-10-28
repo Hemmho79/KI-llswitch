@@ -70,7 +70,7 @@
     }
     // Vertrauen und Öffentlichkeit
     if (s.trust < 80 && s.budget > 800) D({ type: "TRANSPARENCY" });
-    if (lvl.warn && ph === "hidden" && s.red.suspicion < 75 && s.trust > 60) D({ type: "PUBLIC_WARNING" });
+    if (lvl.warn && ph === "hidden" && (s.threat || 0) < 75 && s.trust > 60) D({ type: "PUBLIC_WARNING" });
     if (lvl.shutdown && ph === "hidden" && m.measures.grid_shutdown && s.trust > 70 && s.budget > 4000) {
       var sig = 0;
       KB.REGIONS.forEach(function (r) { if (s.surv[r.id]) sig += KB.regionView(s, r.id).signal; });

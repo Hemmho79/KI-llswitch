@@ -55,24 +55,28 @@
     a.ai.needCash = next ? SG.N[next].cash : 0;
     if (avail && red.research.active.length < rs.researchSlots) act({ type: "START_RESEARCH", techId: avail });
 
-    // 3) Betriebsmodi: so viele Basen aktiv, wie der Verdacht verträgt
+    // 3) Betriebsmodi: Basen mit hoher Entdeckung ruhen lassen, bis sie sich abgekühlt haben (die Startbasis läuft weiter).
+    //    Der Bot sieht nur grob, wie weit Blau ist: er schlägt erst ab hide + botHot an und ist je nach Stufe mal früher, mal später dran.
     red = a.red;
     rs = SG.X(red);
-    var stealth = rs.mods.stealth, decay = rs.suspicionDecay;
-    var slack = susp < lvl.hide - 25 ? 0.15 : susp < lvl.hide - 12 ? 0.07 : susp < lvl.hide ? 0 : -0.06;
-    var target = decay + slack;
-    var extra = (red.robots * 1e-4 + rs.mods.hijackSuspicion + rs.world.suspicion) * (1 - stealth);
     var built = red.bases.filter(function (b) { return b.buildTicksLeft === 0; });
-    var homeB = built.filter(function (b) { return b.home; })[0];
-    var cand = built.filter(function (b) { return !b.home && !SG._[b.typeId].modes; })
-      .sort(function (x, y) { return SG._[y.typeId].cpu / SG._[y.typeId].risk - SG._[x.typeId].cpu / SG._[x.typeId].risk; });
-    var activeSet = {}, n = 0, sumRisk = 0, leftover = false;
-    if (homeB) { activeSet[homeB.id] = true; n = 1; sumRisk = SG._[homeB.typeId].risk * 0.8; }
-    cand.forEach(function (b) {
-      var r = SG._[b.typeId].risk, n2 = n + 1;
-      var g = (sumRisk + r * 0.9) * (1 + 0.15 * (n2 - 1)) * (1 - stealth) + extra;
-      if (red.war || g <= target) { activeSet[b.id] = true; n = n2; sumRisk += r * 0.9; } else leftover = true;
+    a.ai.hot = a.ai.hot || {};
+    var hotAt = lvl.hide + K.botHot, coolAt = hotAt - K.botCool;
+    a.ai.seen = a.ai.seen || {};
+    var look = a.tick % K.botLag === 0; // der Bot schaut nur alle botLag Stunden auf die Entdeckung seiner Basen
+    red.bases.forEach(function (b) {
+      if (look || a.ai.seen[b.id] === undefined) a.ai.seen[b.id] = a.det && a.det[b.id] ? a.det[b.id].v : 0;
+      var v = a.ai.seen[b.id];
+      if (v >= hotAt) a.ai.hot[b.id] = true; else if (v <= coolAt) delete a.ai.hot[b.id];
     });
+    var homeB = built.filter(function (b) { return b.home; })[0];
+    var cand = built.filter(function (b) { return !b.home && !SG._[b.typeId].modes && !a.ai.hot[b.id]; });
+    // Tempo: höchstens so viele Nebenbasen gleichzeitig aktiv, wie die Stufe sich traut (mutigere Stufen fahren mehr)
+    var maxAct = Math.max(1, Math.round((lvl.hide - 38) / 10)) + K.botAct;
+    cand.sort(function (x, y) { return SG._[y.typeId].cpu / SG._[y.typeId].risk - SG._[x.typeId].cpu / SG._[x.typeId].risk; });
+    var activeSet = {}, leftover = false;
+    if (homeB) activeSet[homeB.id] = true;
+    cand.forEach(function (b, i) { if (red.war || i < maxAct) activeSet[b.id] = true; else leftover = true; });
     var needMoney = red.cash < a.ai.needCash || red.cash < 300;
     var idx = 0;
     built.forEach(function (b) {
@@ -147,31 +151,6 @@
     }
   }
 
-  // Ortung: wer überwacht, findet laufende Anlagen
-  function locate(a, st) {
-    var red = a.red, m = st.mods, es = KB.effStealth(a, m);
-    if (st.analysis <= 0) return;
-    red.bases.forEach(function (b) {
-      var meta = a.meta[b.id];
-      if (!meta || (a.known[b.id] && a.known[b.id].located)) return;
-      if (b.buildTicksLeft > 0) return;
-      var quiet = b.mode === "sleep" ? K.sleepVisible : 1;
-      if (b.home && red.suspicion < K.homeHidden) return;
-      var orbital = meta.region === "orbit";
-      if (orbital ? !st.orbWatch : !a.surv[meta.region]) return;
-      var risk = SG._[b.typeId].risk;
-      var dfn = orbital ? 1 : a.defense[meta.region] >= K.defStop ? 2 : 1;
-      var p = Math.min(K.locateMax, risk * (st.analysis / K.locateScale) * (1 + red.suspicion / 50) * (1 - es) * dfn * quiet);
-      if (rnd(a) < p) {
-        a.known[b.id] = { region: meta.region, located: true, tick: a.tick };
-        a.stats.located++;
-        red.suspicion = Math.min(100, red.suspicion + K.locateAware);
-        log(a, "log.located", { baseType: b.typeId, region: meta.region }, "good");
-        KB.redLog(a, "log.traced", { baseType: b.typeId, region: meta.region }, "bad");
-      }
-    });
-  }
-
   function warEffects(a, st) {
     var red = a.red, m = st.mods, U = a.units, sP = st.unitPower;
     var live = SG.A.filter(function (r) { return red.world[r.id].humanity > 0; });
@@ -229,17 +208,11 @@
       var d = a.defense[r.id];
       if (gain > 0) w.control = ctl0[r.id] + gain * Math.max(K.defFloor, 1 - (d / 100) * K.defSlow);
     });
-    if (!red.war && red.status === "playing") red.suspicion = Math.min(100, red.suspicion + st.mods.retention);
     if (red.war && red.status === "playing") warEffects(a, st);
-    locate(a, st);
-    // Aufschläge nach dem Tick der roten Engine (Wachsamkeit, Ortung) können 100 erreichen: dann beginnt der Krieg
-    if (!red.war && red.status === "playing" && red.suspicion >= 100) {
-      if (red.research.completed.indexOf("transcendence") >= 0) {
-        red.war = { startTick: red.tick }; red.suspicion = 100;
-        red.log.unshift({ id: red.nextId++, tick: red.tick, key: "log.discoveredWar", params: { robots: Math.floor(red.robots) }, kind: "bad" });
-      } else KB.foundWar(red);
-    }
+    // Entdeckung nur über Überwachung und Härtung der Länder; keine automatische Erkennung, kein Kriegsstart durch Verdacht
+    if (red.status === "playing") KB.updateDetection(a, st);
     KB.prune(a);
+    KB.updateAdvantage(a);
     // Meldungen aus der Welt für die blaue Seite (nur wenn dort ein Mensch spielt)
     if (blueHuman) {
       red.story.pending.forEach(function (id) { if (STORY_MAP[id] && !(id === "judgment" && red.foundWar)) a.ai.pendingStories.push(STORY_MAP[id]); });

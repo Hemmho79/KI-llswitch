@@ -48,6 +48,8 @@ Wichtig: Den Server nicht ohne Proxy ins Internet stellen, solange `X-Forwarded-
 ## Wie der Server arbeitet
 
 - Der Server hält den einzigen Spielstand pro Raum und rechnet jede Sekunde einen Tick. Räume ohne verbundene Person ruhen.
+- Entdeckung: Es gibt keine automatische Entdeckung. Jede rote Basis hat einen Entdeckungswert (0 bis 100 %), der mit der Erkennungsrate ihres Landes steigt (Überwachung plus Härtung, Orbit-Beobachtung). Bei 100 % sieht Blau die Basis; nur Blau kann sie per Zugriff oder Einsatzkräfte ausschalten. In Ruhe sinkt der Wert langsam, nach dem Aufwecken steigt er erst nach der Abklingzeit wieder. Die Rot-Anzeige „Verdacht“ zeigt, wie weit Blau ist, die Blau-Anzeige „Bedrohung“, wie stark die KI ist. Alle Werte stehen in `KB.K` (`engine/parts/blue_data.js`).
+- Die Dateien unter `engine/` sind die Quelle; `node tools/sync.js` überträgt sie in `public/index.html` (`--check` prüft nur).
 - Jede Person bekommt nur die Sicht ihrer Seite. Blau sieht von Rot nur Spuren aus überwachten Regionen, entdeckte Anlagen und die Kriegslage; Rot sieht von Blau nur, was Blau auch im Einzelspieler dem Gegner verrät (die Entscheidungen im Spiel).
 - Beide Seiten können ein Mensch oder der Computer sein. Die Stärke gilt nur für den Computer.
 - Trennt sich jemand, übernimmt nach 30 s der Computer die Seite; mit derselben Kennung (im Browser gespeichert) kommt die Person zurück. Die Seite bleibt 2 Minuten für sie reserviert.

@@ -47,24 +47,10 @@
   };
 
   // ---- Ereignisse ---------------------------------------------------------
-  function tipTargets(a) {
-    return a.red.bases.filter(function (b) {
-      return b.buildTicksLeft === 0 && b.mode !== "sleep" && a.meta[b.id] && a.meta[b.id].region !== "orbit" &&
-        !(a.known[b.id] && a.known[b.id].located) && !(b.home && a.red.suspicion < K.homeHidden);
-    });
-  }
   var EVENTS = [
     { id: "donation", weight: 3, apply: function (a, st) { var n = Math.round((150 + st.capAll * 15) * (0.5 + rnd(a))); a.budget += n; return { params: { amount: n }, kind: "good" }; } },
     { id: "leak_story", weight: 2, when: function (a) { return KB.REGIONS.some(function (r) { return a.surv[r.id]; }); }, apply: function (a) { a.trust = Math.max(0, a.trust - 6); return { params: { amount: 6 }, kind: "bad" }; } },
     { id: "budget_cut", weight: 1, when: function (a) { return a.budget > 500; }, apply: function (a) { var n = Math.round(a.budget * 0.15); a.budget -= n; return { params: { amount: n }, kind: "bad" }; } },
-    { id: "tip_off", weight: 2, when: function (a) { return tipTargets(a).length > 0; }, apply: function (a) {
-        var c = tipTargets(a);
-        var b = c[Math.floor(rnd(a) * c.length)];
-        a.known[b.id] = { region: a.meta[b.id].region, located: true, tick: a.tick };
-        a.stats.located++;
-        KB.redLog(a, "log.traced", { baseType: b.typeId, region: a.meta[b.id].region }, "bad");
-        return { params: { baseType: b.typeId, region: a.meta[b.id].region }, kind: "good" };
-      } },
     { id: "false_alarm", weight: 2, apply: function (a) { a.trust = Math.max(0, a.trust - 3); return { params: { amount: 3 }, kind: "bad" }; } },
     { id: "outage", weight: 2, when: function (a) { return a.facilities.some(function (f) { return f.mode !== "rest" && f.buildTicksLeft === 0; }); }, apply: function (a) {
         var c = a.facilities.filter(function (f) { return f.mode !== "rest" && f.buildTicksLeft === 0; });
@@ -113,8 +99,8 @@
       a.status = "lost"; a.ending = "trust"; log(a, "log.end.trust", {}, "bad");
       if (human) { red.status = "won"; red.ending = "unwatched"; KB.redLog(a, "log.unwatched", {}, "achievement"); }
     } else if (!red.war && KB.phase(a) === "hidden") {
-      // Im Griff: nach mindestens 3 erfolgreichen Zugriffen bleibt die Bedrohungslage 48 Stunden bei 0
-      a.ai.calm = red.suspicion <= 0.5 && a.stats.raids >= 3 ? (a.ai.calm || 0) + 1 : 0;
+      // Im Griff: nach mindestens 3 erfolgreichen Zugriffen bleibt die Bedrohung 48 Stunden niedrig
+      a.ai.calm = (a.threat || 0) <= K.calmThreat && a.stats.raids >= 3 ? (a.ai.calm || 0) + 1 : 0;
       if (a.ai.calm >= 48) {
         a.status = "won"; a.ending = "contained"; log(a, "log.end.contained", {}, "achievement");
         if (human) { red.status = "lost"; KB.redLog(a, "log.lostContained", {}, "bad"); }
@@ -178,7 +164,7 @@
     if (a.status === "playing" && !a.red.war && rnd(a) < K.eventChance) randomEvent(a, st);
     outcome(a);
     if (!blueBot) { achievements(a); KB.checkStory(a); } else a.story.pending = [];
-    a.stats.peakThreat = Math.max(a.stats.peakThreat, a.red.suspicion);
+    a.stats.peakThreat = Math.max(a.stats.peakThreat, a.threat || 0);
     return a;
   };
 
@@ -226,7 +212,6 @@
       var loot = KB.baseLoot(a, bb);
       a.red.bases = a.red.bases.filter(function (x) { return x.id !== bb.id; });
       delete a.known[bb.id]; delete a.meta[bb.id];
-      a.red.suspicion = Math.max(0, a.red.suspicion + K.raidAware);
       a.stats.raids++;
       a.trust = Math.min(100, a.trust + K.raidTrust);
       a.ai.alertUntil = a.tick + K.alertTicks;
@@ -411,7 +396,6 @@
         });
         var loss = target === "global" ? K.shutTrustGlobal : region(target).population * K.shutTrustPop;
         a.trust = Math.max(0, a.trust - loss);
-        a.red.suspicion = Math.max(0, a.red.suspicion + K.shutAware * killed);
         a.stats.shutdowns++;
         log(a, "log.shutdown", { region: target, killed: killed }, killed > 0 ? "good" : "bad");
         KB.redLog(a, target === "global" ? "log.gridCutGlobal" : "log.gridCut", target === "global" ? { killed: killed } : { region: target, killed: killed }, killed > 0 ? "bad" : "good");
@@ -440,10 +424,10 @@
         if (cooling(a, "warning")) return err(s, "cooldown");
         if (a.budget < K.warnCost) return err(s, "notEnoughBudget");
         a.budget -= K.warnCost; a.cd.warning = a.tick + K.warnCd;
-        a.red.suspicion = Math.min(100, a.red.suspicion + K.warnAware);
+        a.vigil = a.tick + K.warnVigil; // die Öffentlichkeit ist wachsam: Entdeckung schneller
         a.trust = Math.max(0, a.trust + K.warnTrust);
-        log(a, "log.warning", { amount: K.warnAware }, "info");
-        KB.redLog(a, "log.publicWarning", { amount: K.warnAware }, "bad");
+        log(a, "log.warning", { amount: Math.round(K.warnBoost * 100), hours: K.warnVigil }, "info");
+        KB.redLog(a, "log.publicWarning", { amount: Math.round(K.warnBoost * 100), hours: K.warnVigil }, "bad");
         break;
       }
       case "TRANSPARENCY": {
@@ -451,7 +435,6 @@
         if (a.budget < K.transCost) return err(s, "notEnoughBudget");
         a.budget -= K.transCost; a.cd.transparency = a.tick + K.transCd;
         a.trust = Math.min(100, a.trust + K.transTrust);
-        a.red.suspicion = Math.max(0, a.red.suspicion + K.transAware);
         log(a, "log.transparency", { amount: K.transTrust }, "good");
         KB.redLog(a, "event.transparency", {}, "good");
         break;

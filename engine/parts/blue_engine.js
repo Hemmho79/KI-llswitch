@@ -19,6 +19,8 @@
   function facRef(f) { return { typeId: f.typeId, num: f.num, home: !!f.home }; }
   KB.rnd = rnd; KB.log = log; KB.clamp = clamp; KB.facRef = facRef;
 
+  // Standort neuer Basen (Zufall): bevölkerungsreiche, schwach gehärtete Länder sind wahrscheinlicher.
+  // Der Zufall kennt Blaus Überwachung nicht; wer gezielt versteckt bauen will, wählt den Standort selbst (Welt-Tab).
   function pickRegion(a) {
     var w = KB.REGIONS.map(function (r) { return r.population * (1 - (a.defense[r.id] / 100) * 0.8); });
     var sum = w.reduce(function (x, y) { return x + y; }, 0), t = rnd(a) * sum;
@@ -77,6 +79,7 @@
       facilities: [], research: { completed: [], active: [], progress: {}, paid: [] },
       surv: {}, defense: {}, guard: {}, known: {}, meta: {}, cd: {}, blackout: {},
       red: red, pending: null, site: "auto", autoRaid: true,
+      det: {}, threat: 0, vigil: 0, // Entdeckung je rote Basis · Bedrohung (Vorteil der KI, für Blau) · Wachsamkeit bis Tick X (öffentliche Warnung)
       ai: { hiding: false, needCash: 0, readyTick: null, frontTick: -99, lastLogId: 0, noRobots: 0, pendingStories: [] },
       achievements: opts.achievements ? opts.achievements.slice() : [],
       daily: opts.daily ? { lastClaimDay: opts.daily.lastClaimDay, streak: opts.daily.streak } : { lastClaimDay: null, streak: 0 },
@@ -219,7 +222,7 @@
     var survPop = 0, survCount = 0;
     KB.REGIONS.forEach(function (r) { if (a.surv[r.id] && a.red.world[r.id].humanity > 0) { survPop += r.population; survCount++; } });
     drain += survPop * K.survPerPop;
-    var aw = a.red.suspicion, war = !!a.red.war;
+    var aw = a.threat || 0, war = !!a.red.war;
     var relief = war ? 0.5 : 1 - aw / 150;
     var trustRate = K.trustRegen - drain * relief;
     var income = (K.baseIncome + K.incomePerCap * capBase) * (0.4 + 0.6 * a.trust / 100) * (1 + 0.6 * aw / 100) * (1 + m.budget);
@@ -238,6 +241,98 @@
       threat: aw, phase: KB.phase(a), war: rx.war ? { humanity: rx.war.humanity, damage: rx.war.damage, regroup: rx.war.regroup } : null,
       day: Math.floor(a.tick / B) + 1, hour: a.tick % B, active: active
     };
+  };
+
+  // ---- Entdeckung -----------------------------------------------------------
+  // Erkennungsrate eines Landes in %: wie gut Blau es überwacht und gehärtet hat. Für die Umlaufbahn zählt eine
+  // laufende Orbitalplattform im Modus „Ermitteln“.
+  KB.regionRate = function (a, rid) {
+    if (rid === "orbit") {
+      return a.facilities.some(function (f) { return KB.FAC[f.typeId].offworld && f.buildTicksLeft === 0 && f.mode === "investigate"; }) ? K.rateOrbit : 0;
+    }
+    var d = (a.defense[rid] || 0) / 100; // Härtung wirkt überproportional: der Grundschutz allein macht ein Land kaum sichtbar
+    return clamp((a.surv[rid] ? K.rateSurv : 0) + K.rateDef * d * d, 0, 100);
+  };
+
+  // Jede Stunde: Entdeckung je rote Basis fortschreiben. Das ist der einzige Weg, wie Blau Basen findet.
+  // - Laufende Basis: steigt mit der Erkennungsrate ihres Landes (nach Ablauf der Abklingzeit).
+  // - Basis in Ruhe: sinkt langsam. Beim Wechsel in Ruhe beginnt die Abklingzeit, erst danach darf sie wieder steigen.
+  // - Bei 100 %: Blau findet die Basis (bleibt sichtbar, bis sie fällt).
+  KB.updateDetection = function (a, st) {
+    var red = a.red, m = st.mods, es = KB.effStealth(a, m), keep = {};
+    a.det = a.det || {};
+    var boost = K.detBoostMin + (1 - K.detBoostMin) * Math.min(1, st.analysis / K.detBoostFull);
+    var vig = (a.vigil || 0) > a.tick ? 1 + K.warnBoost : 1;
+    var ret = 1 + m.retention * K.detRetention;
+    red.bases.forEach(function (b) {
+      var meta = a.meta[b.id];
+      if (!meta) return;
+      keep[b.id] = true;
+      var d = a.det[b.id] || (a.det[b.id] = { v: 0, calm: 0, mode: b.mode, rate: 0, state: "hidden" });
+      var k = a.known[b.id];
+      if (d.mode !== "sleep" && b.mode === "sleep") d.calm = a.tick + K.detCool;
+      d.mode = b.mode;
+      if (k && k.located) { d.v = 100; d.rate = 0; d.state = "located"; return; }
+      if (b.buildTicksLeft > 0) { d.rate = 0; d.state = "building"; return; }
+      if (b.mode === "sleep") {
+        var before = d.v;
+        d.v = Math.max(0, d.v - K.detDecay);
+        d.rate = d.v - before; d.state = d.v > 0 ? "cooling" : "hidden";
+        return;
+      }
+      if (a.tick < d.calm) { d.rate = 0; d.state = "calm"; return; }
+      var rate = KB.regionRate(a, meta.region);
+      var gain = K.detGain * (rate / 100) * (K.detMode[b.mode] || 1) * (1 + SG._[b.typeId].risk * K.detRisk) * (1 - es) * boost * vig * ret;
+      d.v = Math.min(100, d.v + gain); d.rate = gain; d.state = gain > 0 ? "rising" : "hidden";
+      if (d.v >= 100) {
+        a.known[b.id] = { region: meta.region, located: true, tick: a.tick };
+        a.stats.located++;
+        d.state = "located";
+        log(a, "log.located", { baseType: b.typeId, region: meta.region }, "good");
+        KB.redLog(a, "log.traced", { baseType: b.typeId, region: meta.region }, "bad");
+      }
+    });
+    Object.keys(a.det).forEach(function (id) { if (!keep[id]) delete a.det[id]; });
+  };
+
+  // Anzeigen, wer vorn liegt (jede Stunde neu, geglättet):
+  //  - Verdacht (Rot sieht ihn):  wie weit Blau ist (Entdeckung der Basen, im Krieg der Widerstand der Menschheit)
+  //  - Bedrohung (Blau sieht sie): wie stark die KI ist (Rechenleistung, Forschung, Einfluss, unlöschbar, im Krieg der Verlust der Menschheit)
+  KB.updateAdvantage = function (a) {
+    var red = a.red, rs = SG.X(red), war = !!red.war, blueT, aiT;
+    var built = red.bases.filter(function (b) { return b.buildTicksLeft === 0; });
+    if (war) {
+      var hum = rs.war ? rs.war.humanity : 0;
+      blueT = clamp(hum, 0, 100); aiT = clamp(100 - hum, 0, 100);
+    } else {
+      var det = built.map(function (b) { var k = a.known[b.id]; return k && k.located ? 100 : (a.det[b.id] ? a.det[b.id].v : 0); });
+      var avg = det.length ? det.reduce(function (s, x) { return s + x; }, 0) / det.length : 0;
+      var mx = det.length ? Math.max.apply(null, det) : 0;
+      blueT = 0.55 * avg + 0.45 * mx;
+      var cpu = 0;
+      built.forEach(function (b) { if (b.mode !== "sleep") cpu += SG._[b.typeId].cpu * (a.known[b.id] && a.known[b.id].located ? 0.3 : 1); });
+      var techs = Object.keys(SG.N).length || 1;
+      aiT = 100 * clamp(0.30 * Math.min(1, cpu / 120) + 0.30 * (red.research.completed.length / techs) + 0.25 * (rs.world.avgControl / 100) + 0.15 * (rs.mods.undeletable ? 1 : 0), 0, 1);
+    }
+    var prevB = red.suspicion || 0, prevA = a.threat || 0;
+    red.suspicion = clamp(prevB + (blueT - prevB) * K.advSmooth, 0, 100);
+    red.susTrend = red.suspicion - prevB;
+    a.threat = clamp(prevA + (aiT - prevA) * K.advSmooth, 0, 100);
+  };
+
+  // Was die rote Oberfläche über Blaus Erkennung wissen darf: Rate je Land (mit Überwachung und Härtung) und Entdeckung je eigene Basis
+  KB.redDetectView = function (a) {
+    var regions = {}, bases = {};
+    KB.REGIONS.forEach(function (r) {
+      regions[r.id] = { rate: Math.round(KB.regionRate(a, r.id) * 10) / 10, surv: !!a.surv[r.id], defense: Math.round(a.defense[r.id]) };
+    });
+    var orb = KB.regionRate(a, "orbit");
+    regions.orbit = { rate: orb, surv: orb > 0, defense: 0 };
+    a.red.bases.forEach(function (b) {
+      var d = (a.det || {})[b.id] || { v: 0, rate: 0, state: "hidden", calm: 0 }, k = a.known[b.id], loc = !!(k && k.located);
+      bases[b.id] = { v: loc ? 100 : d.v, rate: d.rate || 0, state: loc ? "located" : d.state || "hidden", calm: Math.max(0, (d.calm || 0) - a.tick), region: a.meta[b.id] ? a.meta[b.id].region : null };
+    });
+    return { regions: regions, bases: bases, cool: K.detCool, vigil: Math.max(0, (a.vigil || 0) - a.tick) };
   };
 
   // Sicht des Spielers auf eine Region (nur Spuren, nie die KI selbst)

@@ -98,14 +98,22 @@
     decisionTimeout: 36, teamSize: 10, teamCd: 12,
     startBudget: 500, startTrust: 80, baseIncome: 10, incomePerCap: 0.9, unitCapBase: 50, unitCapTF: 150, unitCapSC: 600,
     trustRegen: 0.06, survPerPop: 0.0015, facPriv: 0.18, multiActive: 0.06,
-    locateMax: 0.3, locateScale: 250, homeHidden: 30, sleepVisible: 0.12,
-    raidBase: 0.7, raidUnits: 0.2, raidFail: 2, raidAware: 0, locateAware: 6, raidTrust: 1.5,
-    warnAware: 8, warnTrust: -4, warnCost: 500, warnCd: 72, alertTicks: 72, alertDrop: 20, transCost: 600, transTrust: 5, transAware: -3, transCd: 48,
+    // Entdeckung: je Basis ein Wert von 0 bis 100 %. Er steigt mit der Erkennungsrate des Landes
+    // (Überwachung + Härtung). Bei 100 % ist die Basis für Blau sichtbar. Keine Zufallsfunde.
+    rateSurv: 55, rateDef: 45, rateOrbit: 70, // Erkennungsrate je Land in %: Überwachung an + Härtung (0 bis 100 %) · Umlaufbahn mit Beobachtung
+    detGain: 2.5, detRisk: 8, detMode: { profit: 1, research: 0.8, produce: 1.2 }, // Zuwachs je Stunde bei 100 % Rate; Aufschlag je Risiko; Betriebsart
+    detDecay: 0.1, detCool: 48, // in Ruhe: Abbau je Stunde · Abklingzeit in Stunden, bevor die Entdeckung nach Ruhe wieder steigen darf
+    detBoostMin: 0.6, detBoostFull: 12, // „Ermitteln“ beschleunigt (0,6 bis 1,0 je nach Analyseleistung), ist aber keine Voraussetzung
+    botHot: 30, botCool: 20, botAct: 0, botLag: 12, // Rot-Bot: legt eine Basis ab Stufen-„hide“ + botHot still, weckt sie bei botCool darunter wieder auf; schaut nur alle botLag Stunden auf die Entdeckung
+    detRetention: 5, warnBoost: 0.5, warnVigil: 48, // Medienkompetenz wirkt als Beschleuniger · öffentliche Warnung: +50 % für 48 Std.
+    advSmooth: 0.15, calmThreat: 8, // Glättung der Anzeigen Verdacht/Bedrohung · „Im Griff“ bei Bedrohung bis zu diesem Wert
+    raidBase: 0.7, raidUnits: 0.2, raidFail: 2, raidTrust: 1.5,
+    warnTrust: -4, warnCost: 500, warnCd: 72, alertTicks: 72, alertDrop: 20, transCost: 600, transTrust: 5, transCd: 48,
     progCost: 1000, progPerPop: 60, progGain: 12, progTrust: 1.5, progCd: 24,
     shutCostBase: 300, shutPerPop: 40, shutGlobal: 3500, shutTrustPop: 0.5, shutTrustGlobal: 30,
-    shutCdRegion: 72, shutCdGlobal: 168, shutBlackout: 48, shutAware: -5,
+    shutCdRegion: 72, shutCdGlobal: 168, shutBlackout: 48,
     empCost: 15000, empCd: 120, empChance: 0.9,
-    defStop: 50, defSlow: 1.1, defFloor: 0.1, defDecay: 0.02, trustLow: 30,
+    defSlow: 1.1, defFloor: 0.1, defDecay: 0.02, trustLow: 30,
     killRobot: 0.003, protect: 0.0012, unitLoss: 0.0008, resistK: 0.2,
     eventChance: 0.015, maxFront: 3
   };

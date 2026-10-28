@@ -3906,6 +3906,12 @@ addTexts({
       send({ t: "act", a: a });
     }, [send]);
     var role = s.room && s.room.role;
+    useEffect(function () {
+      /* Blaue Farbwelt (data-team="blue") auch im Online-Spiel; in der Lobby neutral ("online"). */
+      document.documentElement.setAttribute("data-team", role === "blue" || role === "red" ? role : "online");
+      var theme = document.querySelector('meta[name="theme-color"]');
+      if (theme) theme.setAttribute("content", role === "blue" ? "#0a1220" : "#0b0f14");
+    }, [role]);
     var view = s.view && s.room && s.view.role === s.room.role ? s.view : null;
     var connection = s.conn;
     var ctx = useMemo(function () {
@@ -4019,7 +4025,9 @@ addTexts({
     var showLang = langState[0], setShowLang = langState[1];
 
     useEffect(function () {
-      document.documentElement.setAttribute("data-team", mode === "online" ? "online" : team || "none");
+      /* Im Online-Modus setzt PVP.Root das Attribut selbst (je nach Rolle im Raum). */
+      if (mode === "online") return;
+      document.documentElement.setAttribute("data-team", team || "none");
       var theme = document.querySelector('meta[name="theme-color"]');
       if (theme) theme.setAttribute("content", team === "blue" ? "#0a1220" : "#0b0f14");
     }, [team, mode]);
